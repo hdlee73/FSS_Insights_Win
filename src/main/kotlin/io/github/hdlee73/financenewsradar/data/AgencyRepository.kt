@@ -1,0 +1,385 @@
+package io.github.hdlee73.financenewsradar.data
+
+import io.github.hdlee73.financenewsradar.model.AgencyGroup
+import io.github.hdlee73.financenewsradar.model.AgencyId
+import io.github.hdlee73.financenewsradar.model.CustomInstitute
+import io.github.hdlee73.financenewsradar.model.ReleaseItem
+import io.github.hdlee73.financenewsradar.model.ReleasePage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URLEncoder
+import java.nio.charset.Charset
+import java.nio.charset.StandardCharsets
+import java.time.LocalDate
+
+/** 기관별 목록 주소·링크 패턴. 사이트가 개편되면 이 파일만 고치면 된다. */
+internal object AgencySources {
+    class Source(
+        val listUrl: (page: Int, pageSize: Int) -> String,
+        /** 사이트 자체 검색 주소(없으면 목록을 받아 앱에서 제목을 걸러낸다). */
+        val searchUrl: ((query: String, page: Int) -> String)? = null,
+        val linkPattern: Regex = Regex(""),
+        val isRss: Boolean = false,
+        /** 페이지 이동 방식을 확인하지 못했거나 RSS처럼 한 번에 받는 경우 false. */
+        val pageable: Boolean = true,
+        val pageSize: Int = 10,
+        /** 목록과 무관한 메뉴 링크를 거르기 위해 날짜가 있는 항목만 쓴다. */
+        val requireDate: Boolean = false,
+        /** 앱 안 검색(최근 10년 훑기)을 지원하는지. 페이지 이동 방식을 확인하지 못한 기관은 false로 두고 사이트 이동만 안내한다. */
+        val deepSearch: Boolean = true,
+        /** 목록을 자바스크립트로 그려 첫 HTTP 응답에는 항목이 없는 사이트: 곧바로 WebView로 읽는다. */
+        val jsRendered: Boolean = false,
+        /** 링크 패턴 대신 쓰는 전용 목록 파서. */
+        val customParser: ((body: String, url: String) -> List<ParsedLink>)? = null,
+        /** HTTP 응답에서 읽은 항목이 이보다 적으면 WebView로도 읽어 더 많이 읽힌 쪽을 쓴다(서버가 목록 일부만 내려주는 사이트용). */
+        val minItems: Int = 1,
+        /** 링크 패턴으로 못 읽으면 날짜 붙은 링크 → 같은 사이트의 긴 제목 링크 순으로 한 번씩 더 시도한다. */
+        val genericFallback: Boolean = false,
+        /** 목록 아래 '더보기' 버튼을 눌러 이어 붙이는 사이트: 이 글자가 든 버튼을 눌러 [minItems]건 이상 읽는다(WebView). */
+        val loadMoreLabel: String? = null,
+        /** 이 주소로 읽지 못했을 때 대신 읽는 설정. */
+        val fallback: Source? = null
+    )
+
+    private fun bcbsHtml() = Source(
+        listUrl = { _, _ -> "https://www.bis.org/publications" },
+        linkPattern = Regex("""(?i)/(publ|bcbs/publ|fsi/publ|speeches|review|cpmi/publ|ifc/publ|iosco/publ)/(?!index\.)[A-Za-z0-9_.-]+\.(htm|html|pdf)"""),
+        pageable = false,
+        deepSearch = false,
+        jsRendered = true,
+        genericFallback = true
+    )
+
+    private fun enc(text: String) = URLEncoder.encode(text, StandardCharsets.UTF_8.toString())
+
+    fun of(agency: AgencyId): Source = when (agency) {
+        AgencyId.FSS -> Source(
+            listUrl = { page, _ -> "https://www.fss.or.kr/fss/bbs/B0000188/list.do?menuNo=200218&pageIndex=$page" },
+            searchUrl = { q, page -> "https://www.fss.or.kr/fss/bbs/B0000188/list.do?menuNo=200218&pageIndex=$page&searchCnd=1&searchWrd=${enc(q)}" },
+            linkPattern = Regex("""view\.do\?.*nttId=\d+""")
+        )
+        AgencyId.FSC -> Source(
+            listUrl = { page, _ -> "https://www.fsc.go.kr/no010101?curPage=$page" },
+            searchUrl = { q, page -> "https://www.fsc.go.kr/no010101?curPage=$page&srchKey=sj&srchText=${enc(q)}" },
+            linkPattern = Regex("""no010101/\d+""")
+        )
+        AgencyId.SEC -> Source(
+            // 검색·페이지 이동이 없는 RSS(최근 보도자료). 과거 자료 검색은 앱이 읽어 온 범위에서 제목으로 거른다.
+            listUrl = { _, _ -> "https://www.sec.gov/news/pressreleases.rss" },
+            isRss = true,
+            pageable = false
+        )
+        AgencyId.KCMI -> Source(
+            listUrl = { page, size -> "https://www.kcmi.re.kr/report/report_list?pg=$page&pp=$size" },
+            // 한 항목에 바로보기가 둘(보도자료 fty=004010 / 보고서 fty=004003)이고 보고서 링크가 없는 항목도 있어,
+            // 제목·저자·날짜는 글 조각 순서로 읽고 링크는 보고서용을 우선한다.
+            customParser = { body, url ->
+                // 글 조각 순서로 읽는 방식과 보고서 링크 기준 방식 중 더 많이 읽힌 쪽을 쓴다(일부만 읽히던 문제 대비).
+                val byText = HtmlListParser.extractReports(body, url)
+                val byLink = HtmlListParser.extractReportsByLink(body, url)
+                if (byLink.size > byText.size) byLink else byText
+            },
+            // 목록은 '더보기'를 눌러야 나머지가 나오므로 WebView로 열어 버튼을 눌러 가며 읽는다.
+            pageable = false,
+            pageSize = 30,
+            minItems = 40,
+            jsRendered = true,
+            loadMoreLabel = "더보기"
+        )
+        AgencyId.KIF -> Source(
+            listUrl = { _, _ -> "https://www.kif.re.kr/kif4/publication/pub_list?mid=10" },
+            // 목록의 상세 링크는 상대경로 `pub_detail?mid=10&nid=…`. 날짜는 "2026-09"(년-월)만 있다.
+            linkPattern = Regex("""pub_detail\?[^"\s]*mid=10(&|$)"""),
+            pageable = false,
+            requireDate = true,
+            deepSearch = false,
+            jsRendered = true
+        )
+        AgencyId.MOEF -> Source(
+            listUrl = { page, _ -> "https://www.mofe.go.kr/nw/nes/nesdta.do?bbsId=MOSFBBS_000000000028&menuNo=4010100&pageIndex=$page" },
+            linkPattern = Regex("""(?i)detailNesDtaView\.do|nesdta\.do\?[^"]*nttId"""),
+            requireDate = true
+        )
+        AgencyId.BOK_PRESS -> Source(
+            listUrl = { page, size -> "https://www.bok.or.kr/portal/singl/newsData/list.do?pageIndex=$page&targetDepth=3&menuNo=201263&syncMenuChekKey=1&searchCnd=1&depth2=200038&depth3=201263&sort=1&pageUnit=$size" },
+            linkPattern = Regex("""view\.do\?[^"]*nttId=\d+"""),
+            requireDate = true
+        )
+        AgencyId.BOK_RESEARCH -> Source(
+            listUrl = { page, size -> "https://www.bok.or.kr/portal/singl/newsData/list.do?pageIndex=$page&targetDepth=2&menuNo=201156&syncMenuChekKey=1&searchCnd=1&depth2=201156&sort=1&pageUnit=$size" },
+            linkPattern = Regex("""view\.do\?[^"]*nttId=\d+"""),
+            requireDate = true,
+            deepSearch = false
+        )
+        AgencyId.FSB -> Source(
+            listUrl = { page, _ -> "https://www.fsb.org/publications/" + if (page > 1) "?mt_page=$page" else "" },
+            // 날짜가 "12 October 2026"처럼 월 이름 전체라서 약어로 바꿔 읽는다.
+            customParser = { body, url ->
+                HtmlListParser.extract(HtmlListParser.abbreviateMonths(body), url, Regex("""/20\d{2}/\d{2}/[^/?#]+"""))
+                    .filter { it.date != null }
+            },
+            deepSearch = false
+        )
+        AgencyId.ESMA -> Source(
+            // 드루팔 목록: 쪽 번호는 0부터.
+            listUrl = { page, _ -> "https://www.esma.europa.eu/databases-library/esma-library?page=${page - 1}" },
+            linkPattern = Regex("""/document/[\w-]+"""),
+            requireDate = true,
+            deepSearch = false
+        )
+        AgencyId.CUSTOM, AgencyId.CUSTOM_PRESS -> error("사용자가 추가한 기관은 별도 경로로 읽습니다.")
+        // 아래 세 곳은 목록을 자바스크립트로 그리거나 일반 요청을 막는 일이 있어 처음부터 WebView(쿠키 허용)로 읽는다.
+        // 링크 패턴을 틀리게 짚어도 목록이 나오도록 genericFallback을 켜 둔다.
+        AgencyId.BCBS -> Source(
+            // BIS의 바젤위원회 발간물 RSS: 제목·발행일이 정확히 나온다. 읽지 못하면 아래 화면 읽기로 대신한다.
+            listUrl = { _, _ -> "https://www.bis.org/doclist/bcbspubls.rss" },
+            isRss = true,
+            pageable = false,
+            deepSearch = false,
+            fallback = bcbsHtml()
+        )
+        AgencyId.FCA -> Source(
+            listUrl = { _, _ -> "https://www.fca.org.uk/research" },
+            linkPattern = Regex("""(?i)/(publications?|research|data)/[A-Za-z0-9-]+/[A-Za-z0-9][A-Za-z0-9._-]{5,}"""),
+            pageable = false,
+            deepSearch = false,
+            jsRendered = true,
+            genericFallback = true
+        )
+        AgencyId.MAS -> Source(
+            listUrl = { _, _ -> "https://www.mas.gov.sg/publications" },
+            linkPattern = Regex("""(?i)/publications/[A-Za-z0-9-]+/(\d{4}/)?[A-Za-z0-9][A-Za-z0-9-]{5,}"""),
+            pageable = false,
+            deepSearch = false,
+            jsRendered = true,
+            genericFallback = true
+        )
+        AgencyId.IOSCO -> Source(
+            listUrl = { page, _ -> "https://www.iosco.org/publications/?subsection=public_reports" + if (page > 1) "&page=$page" else "" },
+            searchUrl = { q, page ->
+                "https://www.iosco.org/publications/?subsection=public_reports&keywords=${enc(q)}&keywordsTitle=on" +
+                    if (page > 1) "&page=$page" else ""
+            },
+            linkPattern = Regex("""(?i)pubdocs/pdf/IOSCOPD\d+\.pdf""")
+        )
+    }
+
+    /** 앱 안 보기 화면에서 열 "사이트에서 직접 검색" 주소. */
+    fun siteSearchUrl(agency: AgencyId, query: String): String {
+        val q = enc(query)
+        return when (agency) {
+            AgencyId.FSS -> "https://www.fss.or.kr/fss/bbs/B0000188/list.do?menuNo=200218&searchCnd=1&searchWrd=$q"
+            AgencyId.FSC -> "https://www.fsc.go.kr/no010101?srchKey=sj&srchText=$q"
+            AgencyId.SEC -> "https://www.google.com/search?q=site%3Asec.gov%2Fnewsroom%2Fpress-releases+$q"
+            AgencyId.KCMI -> "https://www.kcmi.re.kr/report/report_list"
+            AgencyId.KIF -> "https://www.kif.re.kr/kif4/publication/pub_list?mid=10"
+            AgencyId.IOSCO -> "https://www.iosco.org/publications/?subsection=public_reports"
+            AgencyId.BCBS -> "https://www.bis.org/publications"
+            AgencyId.FCA -> "https://www.fca.org.uk/research"
+            AgencyId.MAS -> "https://www.mas.gov.sg/publications"
+            AgencyId.CUSTOM, AgencyId.CUSTOM_PRESS -> "https://www.google.com/search?q=$q"
+            else -> agency.homeUrl
+        }
+    }
+
+    /** 검색어를 공백으로 나눠 모든 단어가 제목에 들어 있으면 일치. */
+    fun matches(title: String, query: String): Boolean {
+        val tokens = query.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        return tokens.isNotEmpty() && tokens.all { title.contains(it, ignoreCase = true) }
+    }
+}
+
+class AgencyRepository(private val context: android.content.Context) {
+    /**
+     * 가장 최근 [count]건. 첫 쪽이 읽히면 곧바로 [onPartial]로 알려 화면에 먼저 보여 주고,
+     * 나머지 쪽은 한꺼번에 병렬로 읽어 오는 대로 다시 [onPartial]로 넘긴다(뒤쪽 쪽이 실패해도 이미 읽은 것은 남는다).
+     */
+    suspend fun latest(agency: AgencyId, count: Int = 10, onPartial: (List<ReleaseItem>) -> Unit = {}): List<ReleaseItem> {
+        val source = AgencySources.of(agency)
+        val items = fetchPage(agency, source, source.listUrl(1, source.pageSize)).toMutableList()
+        // 날짜가 있는 항목을 최신순으로(날짜 없는 항목은 뒤로). 사이트 목록 순서가 들쭉날쭉해도 '최근 N건'이 되도록.
+        fun current() = items.sortedByDescending { it.date }.take(count)
+        val target = if (agency == AgencyId.KCMI || agency == AgencyId.IOSCO || agency == AgencyId.FCA) count * 2 else count
+        if (items.size >= target || !source.pageable) return current()
+        onPartial(current())
+        // 한 쪽이 몇 건인지 알았으니 필요한 쪽(최대 4쪽까지)을 한꺼번에 병렬로 읽는다.
+        val needed = ((target - 1) / items.size.coerceAtLeast(1)).coerceIn(1, MAX_LATEST_PAGE - 1)
+        coroutineScope {
+            val deferred = (2..(1 + needed)).map { page ->
+                async { runCatching { fetchPage(agency, source, source.listUrl(page, source.pageSize)) }.getOrNull() }
+            }
+            for (job in deferred) {
+                val more = job.await() ?: continue
+                items += more.filter { next -> items.none { it.link == next.link } }
+                onPartial(current())
+            }
+        }
+        // 병렬로 읽고도 모자라면 남은 쪽을 이어서 읽는다.
+        var page = 2 + needed
+        while (items.size < target && page <= MAX_LATEST_PAGE) {
+            val more = runCatching { fetchPage(agency, source, source.listUrl(page, source.pageSize)) }.getOrNull() ?: break
+            items += more.filter { next -> items.none { it.link == next.link } }
+            onPartial(current())
+            page++
+        }
+        return current()
+    }
+
+    /**
+     * 과거 자료 검색(최근 [SEARCH_YEARS]년). [page]부터 여러 쪽을 한꺼번에 읽어 제목이 일치하는 항목을 모으고,
+     * 날짜가 기준보다 오래된 쪽에 닿거나 한도에 닿으면 멈춘다. 더 읽을 쪽이 남으면 [ReleasePage.hasMore].
+     * 결과는 항상 앱에서 제목 기준으로 한 번 더 걸러 서버가 검색어를 무시해도 엉뚱한 목록이 나오지 않는다.
+     */
+    suspend fun search(agency: AgencyId, query: String, page: Int = 1): ReleasePage {
+        val source = AgencySources.of(agency)
+        val research = agency.group == AgencyGroup.RESEARCH
+        val maxPages = if (research) MAX_PAGES_PER_CALL_RESEARCH else MAX_PAGES_PER_CALL
+        val target = if (research) TARGET_RESULTS_RESEARCH else TARGET_RESULTS
+        val cutoff = LocalDate.now().minusYears(SEARCH_YEARS)
+        val found = LinkedHashMap<String, ReleaseItem>()
+        var current = page
+        var done = false
+        var scanned = 0
+        while (!done && scanned < maxPages) {
+            val pages = if (source.pageable) (current until current + BATCH_PAGES).filter { it <= MAX_PAGE } else listOf(current)
+            val fetched = coroutineScope {
+                pages.map { p ->
+                    async {
+                        val url = source.searchUrl?.invoke(query, p) ?: source.listUrl(p, source.pageSize)
+                        runCatching { fetchPage(agency, source, url) }
+                    }
+                }.awaitAll()
+            }
+            for ((index, result) in fetched.withIndex()) {
+                val p = pages[index]
+                // 첫 쪽이 실패하면 오류를 그대로 보여 주고, 뒤쪽 실패는 거기까지 읽은 것으로 본다.
+                val items = if (p == page) result.getOrThrow() else result.getOrDefault(emptyList())
+                items.filter { AgencySources.matches(it.title, query) && (it.date == null || it.date >= cutoff) }
+                    .forEach { found.putIfAbsent(it.link, it) }
+                scanned++
+                current = p + 1
+                val dated = items.mapNotNull { it.date }
+                val tooOld = dated.isNotEmpty() && dated.all { it < cutoff }
+                if (!source.pageable || items.isEmpty() || tooOld || p >= MAX_PAGE) {
+                    done = true
+                    break
+                }
+            }
+            if (found.size >= target) break
+        }
+        val sorted = found.values.sortedByDescending { it.date }
+        return ReleasePage(sorted, hasMore = !done, nextPage = current)
+    }
+
+    private suspend fun fetchPage(agency: AgencyId, source: AgencySources.Source, url: String): List<ReleaseItem> {
+        val primary = runCatching { fetchParsed(agency.label, url, source.jsRendered, source.minItems, source.loadMoreLabel) { body -> parse(source, body, url) } }
+        val parsed = primary.getOrElse { error ->
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            val fallback = source.fallback ?: throw error
+            val fallbackUrl = fallback.listUrl(1, fallback.pageSize)
+            fetchParsed(agency.label, fallbackUrl, fallback.jsRendered, fallback.minItems, fallback.loadMoreLabel) { body -> parse(fallback, body, fallbackUrl) }
+        }
+        return parsed.map { ReleaseItem(agency, it.title, it.url, it.date, author = it.author) }
+    }
+
+    /** 사용자가 추가한 연구소의 목록(최근 [count]건). 주소 패턴을 모르므로 범용 추출을 쓴다. */
+    suspend fun latestCustom(institute: CustomInstitute, count: Int = 20): List<ReleaseItem> =
+        fetchParsed(institute.name, institute.url) { body -> HtmlListParser.extractGeneric(body, institute.url) }
+            .take(count)
+            .map { ReleaseItem(institute.agency, it.title, it.url, it.date, institute.name) }
+
+    /** 추가한 연구소는 검색 주소를 모르므로 읽어 온 목록(최대 30건)에서 제목을 걸러 낸다. */
+    suspend fun searchCustom(institute: CustomInstitute, query: String): List<ReleaseItem> =
+        latestCustom(institute, 30).filter { AgencySources.matches(it.title, query) }
+
+    private suspend fun fetchParsed(label: String, url: String, webViewOnly: Boolean = false, minItems: Int = 1, moreLabel: String? = null, parse: (String) -> List<ParsedLink>): List<ParsedLink> {
+        var parsed: List<ParsedLink> = emptyList()
+        var lastBody = ""
+        var failure: Throwable? = null
+        // 1차: 가벼운 HTTP 요청. 2차: 막히거나 목록이 비면 숨은 WebView로 실제 화면의 HTML을 읽는다.
+        for (useWebView in if (webViewOnly) listOf(true) else listOf(false, true)) {
+            val body = try {
+                if (useWebView) WebViewFetcher.get(context, url, moreLabel) { html -> parse(html).size >= if (moreLabel != null) minItems else 1 } else HtmlFetcher.get(url)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                failure = failure ?: e
+                continue
+            }
+            lastBody = body
+            val result = parse(body)
+            if (result.size > parsed.size) parsed = result
+            if (parsed.size >= minItems) break
+        }
+        if (parsed.isEmpty()) {
+            val detail = if (lastBody.isEmpty()) (failure?.message ?: "응답 없음")
+            else "응답 ${lastBody.length}자 · 링크 ${HtmlListParser.anchorCount(lastBody)}개 · ${HtmlListParser.sampleLinks(lastBody)}"
+            error("$label 목록을 읽지 못했습니다. 사이트가 접속을 막았거나 구조가 바뀌었을 수 있습니다. ‘사이트에서 보기’를 이용해 주세요. ($detail)")
+        }
+        return parsed
+    }
+
+    private fun parse(source: AgencySources.Source, body: String, url: String): List<ParsedLink> {
+        source.customParser?.let { return it(body, url) }
+        var parsed = if (source.isRss) HtmlListParser.parseRss(body, url)
+        else HtmlListParser.extract(body, url, source.linkPattern)
+        if (source.requireDate) parsed = parsed.filter { it.date != null }.sortedByDescending { it.date }
+        // 링크 형식이 예상과 다르면(금융연구원 등) 날짜가 붙은 링크를 목록으로 간주하는 방식으로 한 번 더 시도한다.
+        if (parsed.isEmpty() && source.requireDate) parsed = HtmlListParser.extractLoose(body, url)
+        if (parsed.isEmpty() && source.genericFallback) parsed = HtmlListParser.extractGeneric(body, url)
+        return parsed
+    }
+
+    private companion object {
+        const val MAX_LATEST_PAGE = 4
+        const val MAX_PAGES_PER_CALL = 4
+        const val MAX_PAGES_PER_CALL_RESEARCH = 12
+        const val BATCH_PAGES = 4
+        const val MAX_PAGE = 200
+        const val TARGET_RESULTS = 10
+        const val TARGET_RESULTS_RESEARCH = 30
+        const val SEARCH_YEARS = 10L
+    }
+}
+
+internal object HtmlFetcher {
+    private const val USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"
+
+    init {
+        // HTTP 요청도 쿠키를 모두 받아 다음 요청에 돌려보낸다(쿠키 동의가 필요한 사이트용).
+        if (java.net.CookieHandler.getDefault() == null) {
+            java.net.CookieHandler.setDefault(java.net.CookieManager(null, java.net.CookiePolicy.ACCEPT_ALL))
+        }
+    }
+
+    suspend fun get(url: String): String = withContext(Dispatchers.IO) {
+        val connection = URI(url).toURL().openConnection() as HttpURLConnection
+        try {
+            connection.connectTimeout = 8_000
+            connection.readTimeout = 12_000
+            connection.instanceFollowRedirects = true
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            connection.setRequestProperty("Accept-Language", "ko-KR,ko;q=0.9,en;q=0.5")
+            val code = connection.responseCode
+            if (code !in 200..299) error("서버 응답 오류 ($code)")
+            val bytes = connection.inputStream.use { it.readBytes() }
+            String(bytes, detectCharset(connection.contentType, bytes))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun detectCharset(contentType: String?, bytes: ByteArray): Charset {
+        val fromHeader = contentType?.let { Regex("charset=([\\w-]+)", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(1) }
+        val head = String(bytes, 0, minOf(bytes.size, 2048), StandardCharsets.ISO_8859_1)
+        val fromMeta = Regex("charset=[\"']?([\\w-]+)", RegexOption.IGNORE_CASE).find(head)?.groupValues?.get(1)
+        return (fromHeader ?: fromMeta)?.let { runCatching { Charset.forName(it) }.getOrNull() } ?: StandardCharsets.UTF_8
+    }
+}

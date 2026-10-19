@@ -1,0 +1,286 @@
+package io.github.hdlee73.financenewsradar.ui
+
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Business
+import androidx.compose.material.icons.filled.Gavel
+import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Newspaper
+import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.Newspaper
+import androidx.compose.material.icons.outlined.ShowChart
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.ui.platform.LocalView
+import io.github.hdlee73.financenewsradar.ui.theme.AppColors
+import io.github.hdlee73.financenewsradar.ui.theme.HeroPalettes
+import io.github.hdlee73.financenewsradar.ui.theme.LocalHeroPalette
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.collectAsState
+import io.github.hdlee73.financenewsradar.model.AgencyGroup
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import io.github.hdlee73.financenewsradar.BuildConfig
+import io.github.hdlee73.financenewsradar.data.UpdateStatus
+import kotlinx.coroutines.launch
+private class AppScreen(val label: String, val icon: ImageVector)
+
+private const val SCREEN_BRIEFING = 0
+private const val SCREEN_NEWS = 1
+private const val SCREEN_MARKET = 2
+private const val SCREEN_PRESS = 3
+private const val SCREEN_RESEARCH = 4
+private const val SCREEN_LIBRARY = 5
+private const val SCREEN_SITES = 6
+private const val SCREEN_ALERTS = 7
+private const val SCREEN_INFO = 8
+private const val SCREEN_FISIS = 9
+private const val SCREEN_REGULATORY = 10
+private const val SCREEN_SANCTION = 11
+
+// 왼쪽 서랍 메뉴에 나오는 모든 화면(순서 = 화면 번호). 오늘의 브리핑·뉴스·시장동향의 번호는 브리핑 화면의 바로가기와 같다.
+private val appScreens = listOf(
+    AppScreen("오늘의 브리핑", Icons.Filled.WbSunny),
+    AppScreen("뉴스 검색", Icons.Filled.Newspaper),
+    AppScreen("금융시장 동향", Icons.Filled.ShowChart),
+    AppScreen("보도자료", Icons.Filled.Description),
+    AppScreen("금융관련 리포트", Icons.Filled.Science),
+    AppScreen("참고 자료실", Icons.Filled.FolderOpen),
+    AppScreen("주요사이트", Icons.Filled.Language),
+    AppScreen("알림", Icons.Filled.Notifications),
+    AppScreen("앱 정보", Icons.Filled.Info),
+    AppScreen("금융회사 주요 현황", Icons.Filled.Business),
+    AppScreen("유권해석·비조치의견서·행정지도", Icons.Filled.Gavel),
+    AppScreen("금융회사 제재공시", Icons.Filled.Gavel)
+)
+
+// 서랍 메뉴의 묶음: 소제목과 그 아래 화면 번호.
+private val drawerSections = listOf(
+    null to listOf(SCREEN_BRIEFING, SCREEN_NEWS, SCREEN_MARKET, SCREEN_FISIS, SCREEN_SANCTION),
+    "자료" to listOf(SCREEN_PRESS, SCREEN_REGULATORY, SCREEN_RESEARCH, SCREEN_LIBRARY),
+    "더보기" to listOf(SCREEN_SITES, SCREEN_ALERTS, SCREEN_INFO)
+)
+
+/** 앱의 뼈대: 왼쪽 서랍 메뉴(상단 메뉴 버튼 또는 화면 왼쪽 가장자리 밀기)로 모든 화면을 오간다. */
+@Composable
+fun FinanceNewsRadarApp(
+    newsViewModel: NewsViewModel = remember { NewsViewModel() },
+    releasesViewModel: ReleasesViewModel = remember { ReleasesViewModel() },
+    libraryViewModel: LibraryViewModel = remember { LibraryViewModel() },
+    marketViewModel: MarketViewModel = remember { MarketViewModel() },
+    fisisViewModel: FisisViewModel = remember { FisisViewModel() },
+    regulatoryViewModel: RegulatoryViewModel = remember { RegulatoryViewModel() }
+) {
+    val newsState by newsViewModel.state.collectAsState()
+    val releases by releasesViewModel.state.collectAsState()
+    val updateAvailable by UpdateStatus.available.collectAsState()
+    val snackbarHost = remember { SnackbarHostState() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val stateHolder = rememberSaveableStateHolder()
+    var screen by rememberSaveable { mutableIntStateOf(SCREEN_BRIEFING) }
+    // 앱 안에서 거쳐 온 화면(뒤로가기 시 이전 화면으로). "1,2" 형태의 문자열로 저장해 화면 회전에도 유지한다.
+    var history by rememberSaveable { mutableStateOf("") }
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+
+    fun openMenu() {
+        keyboard?.hide()
+        focusManager.clearFocus()
+        scope.launch { drawerState.open() }
+    }
+    fun go(target: Int) {
+        keyboard?.hide()
+        focusManager.clearFocus()
+        if (target != screen) {
+            history = (history.split(',').filter { it.isNotEmpty() } + screen.toString()).takeLast(30).joinToString(",")
+            screen = target
+        }
+        scope.launch { drawerState.close() }
+    }
+    BackHandler(enabled = history.isNotEmpty() && !drawerState.isOpen) {
+        val stack = history.split(',').filter { it.isNotEmpty() }
+        screen = stack.last().toInt()
+        history = stack.dropLast(1).joinToString(",")
+    }
+    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+
+    LaunchedEffect(newsState.error) {
+        newsState.error?.let {
+            snackbarHost.showSnackbar(it)
+            newsViewModel.dismissError()
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
+                    Column(Modifier.padding(start = 28.dp, end = 16.dp, top = 28.dp, bottom = 12.dp)) {
+                        Text("FSS Insights", style = MaterialTheme.typography.headlineSmall)
+                        Text("v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    drawerSections.forEachIndexed { index, (title, ids) ->
+                        if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 28.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                        if (title != null) {
+                            Text(title, Modifier.padding(start = 28.dp, top = 4.dp, bottom = 4.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        ids.forEach { id ->
+                            val item = appScreens[id]
+                            NavigationDrawerItem(
+                                icon = { Icon(item.icon, contentDescription = null) },
+                                label = { Text(item.label) },
+                                badge = if (id == SCREEN_INFO && updateAvailable != null) {
+                                    { Text("NEW", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium) }
+                                } else null,
+                                selected = screen == id,
+                                onClick = { go(id) },
+                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    ) {
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(snackbarHost) }
+    ) { padding ->
+        val palette = when (screen) {
+            SCREEN_BRIEFING -> HeroPalettes.Sky
+            SCREEN_NEWS -> HeroPalettes.Indigo
+            SCREEN_MARKET -> HeroPalettes.Teal
+            SCREEN_PRESS -> HeroPalettes.Ocean
+            SCREEN_RESEARCH -> HeroPalettes.Violet
+            SCREEN_LIBRARY -> HeroPalettes.Amber
+            SCREEN_SITES -> HeroPalettes.Slate
+            SCREEN_ALERTS -> HeroPalettes.Rose
+            SCREEN_FISIS -> HeroPalettes.Green
+            SCREEN_REGULATORY -> HeroPalettes.Indigo
+            SCREEN_SANCTION -> HeroPalettes.Coral
+            else -> HeroPalettes.Slate
+        }
+        CompositionLocalProvider(LocalHeroPalette provides palette) {
+        Column(Modifier.fillMaxSize().padding(padding).navigationBarsPadding()) {
+        // 상태 표시줄 영역과 상단 메뉴 바를 같은 네이비로 칠한다.
+        Spacer(Modifier.fillMaxWidth().background(AppColors.heroStart).windowInsetsTopHeight(WindowInsets.statusBars))
+        Row(Modifier.fillMaxWidth().background(AppColors.heroStart).height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = ::openMenu) {
+                Icon(Icons.Filled.Menu, contentDescription = "메뉴 열기", tint = AppColors.onHero)
+            }
+            Text("FSS Insights", color = AppColors.onHero, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            // 화면을 오가도 각 화면의 검색어·스크롤 위치가 유지되도록 화면별로 상태를 보관한다.
+            stateHolder.SaveableStateProvider(screen) {
+                when (screen) {
+                    SCREEN_BRIEFING -> BriefingScreen(newsViewModel, releasesViewModel, marketViewModel, onOpenTab = ::go)
+                    SCREEN_NEWS -> NewsScreen(newsViewModel, onOpenSettings = { settingsOpen = true })
+                    SCREEN_MARKET -> MarketScreen(marketViewModel)
+                    SCREEN_FISIS -> FisisScreen(fisisViewModel)
+                    SCREEN_REGULATORY -> RegulatoryScreen(regulatoryViewModel)
+                    SCREEN_SANCTION -> RegulatoryScreen(regulatoryViewModel, title = "금융회사 제재공시", sources = RegulatoryMenus.sanction)
+                    SCREEN_PRESS -> ReleasesScreen(AgencyGroup.PRESS, releasesViewModel)
+                    SCREEN_RESEARCH -> ReleasesScreen(AgencyGroup.RESEARCH, releasesViewModel)
+                    SCREEN_LIBRARY -> LibraryScreen(libraryViewModel)
+                    SCREEN_SITES -> SitesScreen(
+                        links = releases.links,
+                        onSave = releasesViewModel::saveLinks,
+                        onReset = releasesViewModel::resetLinks
+                    )
+                    SCREEN_ALERTS -> AlertSettingsScreen(newsState.settings.keywords)
+                    else -> AppInfoScreen()
+                }
+            }
+        }
+        }
+        }
+    }
+    }
+
+    if (settingsOpen) {
+        SettingsDialog(
+            current = newsState.settings,
+            credentials = newsState.credentials,
+            onDismiss = { settingsOpen = false },
+            onSave = { settings, credentials ->
+                newsViewModel.saveSettings(settings, credentials)
+                settingsOpen = false
+            }
+        )
+    }
+
+    // 새 버전이 있으면 앱을 열 때마다(설치 전까지) 팝업으로 알린다.
+    UpdatePrompt(onOpenAppInfo = { screen = SCREEN_INFO })
+
+    // 최초 실행 1회: 비공식 앱 안내(확인해야 닫힘).
+    DisclaimerDialog()
+}

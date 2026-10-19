@@ -1,0 +1,97 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Unit tests
+        run: ./gradlew.bat test --no-daemon --console=plain
+
+      - name: Ensure WiX Toolset v3 (MSI packaging)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            choco install wixtoolset --version=3.14.1 -y --no-progress
+          }
+          candle.exe -? 2>&1 | Select-Object -First 2
+
+      - name: Build Windows installer (MSI)
+        env:
+          NEWS_PROXY_URL: ${{ vars.NEWS_PROXY_URL }}
+          NEWS_PROXY_TOKEN: ${{ secrets.NEWS_PROXY_TOKEN }}
+        run: ./gradlew.bat packageMsi --no-daemon --console=plain
+
+      - name: Read app version
+        shell: pwsh
+        run: |
+          $line = Select-String -Path build.gradle.kts -Pattern '^version = "([^"]+)"' | Select-Object -First 1
+          if (-not $line) { throw "build.gradle.kts 에서 version 을 찾지 못했습니다." }
+          "VERSION=$($line.Matches[0].Groups[1].Value)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Prepare release files
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem build/compose/binaries/main/msi/*.msi | Select-Object -First 1
+          if (-not $msi) { throw "MSI 파일을 찾지 못했습니다." }
+          $asset = "fss-insights-windows-v$env:VERSION.msi"
+          Copy-Item $msi.FullName $asset
+          $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
+          "$hash  $asset" | Out-File -Encoding ascii "$asset.sha256"
+          Get-Item $asset, "$asset.sha256" | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fss-insights-windows-msi
+          path: |
+            fss-insights-windows-v${{ env.VERSION }}.msi
+            fss-insights-windows-v${{ env.VERSION }}.msi.sha256
+
+      - name: Publish GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:VERSION"
+          $asset = "fss-insights-windows-v$env:VERSION.msi"
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --notes-file RELEASE_NOTES.md
+            gh release upload $tag $asset "$asset.sha256" --clobber
+          } else {
+            gh release create $tag $asset "$asset.sha256" `
+              --target "$env:GITHUB_SHA" `
+              --title "FSS Insights for Windows v$env:VERSION" `
+              --notes-file RELEASE_NOTES.md
+          }
+
+      - name: Publish test build (pre-release, not a version release)
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $asset = "fss-insights-windows-v$env:VERSION.msi"
+          gh release delete test-build --cleanup-tag --yes 2>$null | Out-Null
+          gh release create test-build $asset `
+            --prerelease `
+            --target "$env:GITHUB_SHA" `
+            --title "테스트 빌드 (정식 릴리스 아님)" `
+            --notes "브랜치 $env:GITHUB_REF_NAME 의 테스트용 설치 파일입니다. 기존 앱 위에 설치하면 업데이트됩니다."
