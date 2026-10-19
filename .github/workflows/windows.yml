@@ -24,14 +24,6 @@ jobs:
       - name: Unit tests
         run: ./gradlew.bat test --no-daemon --console=plain
 
-      - name: Ensure WiX Toolset v3 (MSI packaging)
-        shell: pwsh
-        run: |
-          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
-            choco install wixtoolset --version=3.14.1 -y --no-progress
-          }
-          candle.exe -? 2>&1 | Select-Object -First 2
-
       - name: Build Windows installer (MSI)
         env:
           NEWS_PROXY_URL: ${{ vars.NEWS_PROXY_URL }}

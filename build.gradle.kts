@@ -79,8 +79,9 @@ compose.desktop {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "FSS Insights"
             packageVersion = "1.5.0"
-            description = "FSS Insights - 금융 뉴스·시장동향·보도자료 조회 프로그램"
-            copyright = "© 2026 hdlee73"
+            // MSI 요약 정보(WiX light)는 코드페이지 1252로 기록되므로 description·copyright 는 ASCII 로 둔다.
+            description = "FSS Insights for Windows - financial news, market data and research search"
+            copyright = "Copyright (c) 2026 hdlee73"
             vendor = "hdlee73"
 
             windows {
