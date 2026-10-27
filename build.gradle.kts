@@ -59,6 +59,10 @@ dependencies {
     implementation("org.jsoup:jsoup:1.23.2")
     implementation("org.json:json:20260814")
     implementation(project(":law-core"))
+    // 스마트 법령검색 화면이 쓰는 ViewModel·수명주기 도구(안드로이드와 같은 API).
+    implementation("androidx.lifecycle:lifecycle-viewmodel:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     // 요약용: PDF 앞쪽 본문 글 추출
     implementation("org.apache.pdfbox:pdfbox:3.0.4")
 
