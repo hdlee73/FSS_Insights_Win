@@ -1,6 +1,6 @@
 # FSS Insights for Windows (뉴스 및 연구자료 검색)
 
-국내 기사를 빠르게 모아 시간순으로 확인하고 공유하는 Windows 데스크톱 프로그램입니다. Android 앱 **FSS Insights** 와 화면·기능·동작이 같도록 Android Jetpack Compose 소스를 **Compose Multiplatform Desktop**(Kotlin/JVM)으로 옮겨 만들었습니다. 버전과 데이터 형식이 Android 앱(v2.0.2, versionCode 55)과 맞춰져 있습니다.
+국내 기사를 빠르게 모아 시간순으로 확인하고 공유하는 Windows 데스크톱 프로그램입니다. Android 앱 **FSS Insights** 와 화면·기능·동작이 같도록 Android Jetpack Compose 소스를 **Compose Multiplatform Desktop**(Kotlin/JVM)으로 옮겨 만들었습니다. 버전과 데이터 형식이 Android 앱(v2.0.3, versionCode 56)과 맞춰져 있습니다.
 
 - Android 앱 저장소: <https://github.com/hdlee73/FSS_insights>
 - 이 저장소(Windows): <https://github.com/hdlee73/FSS_Insights_Win>

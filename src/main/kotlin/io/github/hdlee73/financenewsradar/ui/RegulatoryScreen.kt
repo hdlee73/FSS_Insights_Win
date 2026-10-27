@@ -39,10 +39,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.unit.sp
-import io.github.hdlee73.financenewsradar.data.RegulatoryParser
-import io.github.hdlee73.financenewsradar.data.RegulatoryRepository
 import io.github.hdlee73.financenewsradar.data.SummaryEngine
 import io.github.hdlee73.financenewsradar.data.SummaryStore
+import io.github.hdlee73.financenewsradar.data.RegulatoryParser
+import io.github.hdlee73.financenewsradar.data.RegulatoryRepository
 import io.github.hdlee73.financenewsradar.model.RegItem
 import io.github.hdlee73.financenewsradar.model.RegSource
 import kotlinx.coroutines.CancellationException
@@ -61,7 +61,7 @@ data class RegSourceState(
     val loadingBodies: Boolean = false,
     val error: String? = null,
     val loaded: Boolean = false,
-    /** 자료 링크 → 기기 내 Gemini Nano가 만든 핵심 내용 요약(지원 기기에서만 채워진다). */
+    /** 자료 링크 → 기기 내 Gemini Nano가 만든 핵심내용 요약(지원 기기에서만 채워진다). */
     val summaries: Map<String, String> = emptyMap(),
     /** 요약이 아직 없는 자료의 상태 문구(대기·진행·불가 사유). */
     val summaryNotes: Map<String, String> = emptyMap()
@@ -70,10 +70,11 @@ data class RegSourceState(
 class RegulatoryViewModel(application: Context = Context.app) : AppViewModel() {
     private val repository = RegulatoryRepository(application)
     private val jobs = mutableMapOf<RegSource, Job>()
-    private val summaryJobs = mutableMapOf<RegSource, Job>()
     private val summaryStore = SummaryStore(application, "summary_cache_regulatory")
+    private val summaryJobs = mutableMapOf<RegSource, Job>()
     private val summarySkipped = mutableSetOf<String>()
-    private val _state = MutableStateFlow(summaryStore.load().let { saved -> RegSource.entries.associateWith { RegSourceState(summaries = saved) } })
+    private var allSummaries: Map<String, String> = summaryStore.load()
+    private val _state = MutableStateFlow(RegSource.entries.associateWith { RegSourceState() })
     val state: StateFlow<Map<RegSource, RegSourceState>> = _state.asStateFlow()
 
     private fun update(source: RegSource, change: (RegSourceState) -> RegSourceState) {
@@ -85,6 +86,45 @@ class RegulatoryViewModel(application: Context = Context.app) : AppViewModel() {
         val current = _state.value.getValue(source)
         if (current.loaded || current.loading) return
         refresh(source)
+    }
+
+    /**
+     * Gemini Nano가 있는 기기에서만: 이미 읽어 둔 상세 내용으로 핵심내용 요약을 만들어 제목 아래에 보여 준다.
+     * 이미 만든 요약은 다시 만들지 않고, 기기가 지원하지 않으면 아무 것도 하지 않아 화면은 그대로다.
+     */
+    fun summarize(source: RegSource) {
+        if (source == RegSource.FSS_SANCTION) return
+        summaryJobs.filterKeys { it != source }.values.forEach { it.cancel() }
+        summaryJobs[source]?.cancel()
+        summaryJobs[source] = viewModelScope.launch {
+            if (!SummaryEngine.isAvailable()) return@launch
+            val items = _state.value.getValue(source).items
+            // 요약문 저장소는 링크별이라 보관해 둔 요약은 바로 보여 준다.
+            val known = items.filter { allSummaries.containsKey(it.link) }.associate { it.link to allSummaries.getValue(it.link) }
+            update(source) { it.copy(summaries = it.summaries + known) }
+            val todo = items.filter { !allSummaries.containsKey(it.link) && it.link !in summarySkipped && it.body.isNotEmpty() }
+            if (todo.isEmpty()) return@launch
+            try {
+                update(source) { s -> s.copy(summaryNotes = s.summaryNotes + todo.associate { it.link to "요약 대기 중" }) }
+                for (item in todo) {
+                    update(source) { s -> s.copy(summaryNotes = s.summaryNotes + (item.link to "요약 중…")) }
+                    val (kind, focus) = if (source.isGuidance) "행정지도 문서" to "행정지도의 목적과 핵심 내용(대상·조치 사항)"
+                    else "유권해석 또는 비조치의견서" to "질의 요지와 회신(결론)"
+                    val outcome = SummaryEngine.summarize(item.title, item.body, kind, focus)
+                    if (outcome.text != null) {
+                        allSummaries = allSummaries + (item.link to outcome.text)
+                        summaryStore.save(allSummaries)
+                        update(source) { s -> s.copy(summaries = s.summaries + (item.link to outcome.text), summaryNotes = s.summaryNotes - item.link) }
+                    } else {
+                        summarySkipped += item.link
+                        update(source) { s -> s.copy(summaryNotes = s.summaryNotes + (item.link to "요약 불가 · ${outcome.reason}")) }
+                    }
+                }
+            } finally {
+                // 중간에 멈췄다면(다른 탭으로 이동 등) 대기·진행 문구는 지운다. 실패 사유는 남긴다.
+                update(source) { s -> s.copy(summaryNotes = s.summaryNotes.filterValues { !it.startsWith("요약 대기") && !it.startsWith("요약 중") }) }
+            }
+        }
     }
 
     fun refresh(source: RegSource) {
@@ -101,7 +141,7 @@ class RegulatoryViewModel(application: Context = Context.app) : AppViewModel() {
                     update(source) { s -> s.copy(items = list.map { n -> s.items.firstOrNull { o -> o.link == n.link && o.body.isNotEmpty() } ?: n }, loadingBodies = true) }
                 }
                 update(source) { it.copy(items = items, loading = false, loadingBodies = false, loaded = true) }
-                summarize(source, items)
+                summarize(source)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -109,39 +149,6 @@ class RegulatoryViewModel(application: Context = Context.app) : AppViewModel() {
             }
         }
     }
-
-    /**
-     * Gemini Nano가 있는 기기에서만: 읽어 둔 상세 내용으로 항목마다 핵심 내용 요약을 만들어 제목 아래에 보여 준다.
-     * 이미 만든 요약은 다시 만들지 않고, 지원하지 않는 기기에서는 아무 것도 하지 않아 화면은 그대로다.
-     */
-    private fun summarize(source: RegSource, items: List<RegItem>) {
-        if (source == RegSource.FSS_SANCTION) return
-        summaryJobs[source]?.cancel()
-        summaryJobs[source] = viewModelScope.launch {
-            if (!SummaryEngine.isAvailable()) return@launch
-            val todo = items.filter { !_state.value.getValue(source).summaries.containsKey(it.link) && it.link !in summarySkipped }
-            if (todo.isEmpty()) return@launch
-            try {
-                setNotes(source) { notes -> notes + todo.associate { it.link to "요약 대기 중" } }
-                for (item in todo) {
-                    setNotes(source) { it + (item.link to "요약 중…") }
-                    val outcome = SummaryEngine.summarize(item.title, item.body, source.summaryKind, source.summaryFocus)
-                    if (outcome.text != null) {
-                        update(source) { it.copy(summaries = it.summaries + (item.link to outcome.text), summaryNotes = it.summaryNotes - item.link) }
-                        summaryStore.save(_state.value.values.fold(emptyMap()) { acc, s -> acc + s.summaries })
-                    } else {
-                        summarySkipped += item.link
-                        setNotes(source) { it + (item.link to "요약 불가 · ${outcome.reason}") }
-                    }
-                }
-            } finally {
-                setNotes(source) { notes -> notes.filterValues { !it.startsWith("요약 대기") && !it.startsWith("요약 중") } }
-            }
-        }
-    }
-
-    private fun setNotes(source: RegSource, change: (Map<String, String>) -> Map<String, String>) =
-        update(source) { it.copy(summaryNotes = change(it.summaryNotes)) }
 }
 
 /** 서랍 메뉴별 출처 묶음. */
@@ -168,7 +175,7 @@ fun RegulatoryScreen(
     var query by rememberSaveable { mutableStateOf("") }
     val source = sources[selected.coerceIn(0, sources.lastIndex)]
     val state = states.getValue(source)
-    LaunchedEffect(source) { viewModel.ensure(source) }
+    LaunchedEffect(source) { viewModel.ensure(source); if (state.loaded) viewModel.summarize(source) }
 
     val shown = remember(state.items, query) {
         if (query.isBlank()) state.items else state.items.filter { RegulatoryParser.matches(it, query) }
@@ -267,7 +274,6 @@ private fun RegulatoryRow(item: RegItem, query: String, summary: String?, summar
             InitialAvatar(item.title, stripe)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(item.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                SummaryLines(summary, summaryNote)
                 if (meta.isNotEmpty()) Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (snippet != null) Text(snippet, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
@@ -275,7 +281,12 @@ private fun RegulatoryRow(item: RegItem, query: String, summary: String?, summar
         return@ListCard
     }
         Text(item.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 3, overflow = TextOverflow.Ellipsis)
-        SummaryLines(summary, summaryNote)
+        // Gemini Nano가 만든 핵심내용 요약(지원 기기에서만 있음). 없으면 이 줄은 나타나지 않는다.
+        if (summary != null) {
+            Text("✦ $summary", style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 17.sp), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        } else if (summaryNote != null) {
+            Text("✦ $summaryNote", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp), color = MaterialTheme.colorScheme.outline, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (item.source.isGuidance) {
                 when (item.inForce) {
@@ -289,15 +300,5 @@ private fun RegulatoryRow(item: RegItem, query: String, summary: String?, summar
         if (snippet != null) {
             Text(snippet, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
-    }
-}
-
-@Composable
-private fun SummaryLines(summary: String?, note: String?) {
-    // Gemini Nano가 만든 핵심 내용 요약(지원 기기에서만 있음). 없으면 이 줄은 나타나지 않는다.
-    if (summary != null) {
-        Text("✦ $summary", style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 17.sp), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
-    } else if (note != null) {
-        Text("✦ $note", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp), color = MaterialTheme.colorScheme.outline, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
