@@ -1,13 +1,13 @@
 # FSS Insights for Windows (뉴스 및 연구자료 검색)
 
-국내 기사를 빠르게 모아 시간순으로 확인하고 공유하는 Windows 데스크톱 프로그램입니다. Android 앱 **FSS Insights** 와 화면·기능·동작이 같도록 Android Jetpack Compose 소스를 **Compose Multiplatform Desktop**(Kotlin/JVM)으로 옮겨 만들었습니다. 버전과 데이터 형식이 Android 앱(v1.5.0, versionCode 42)과 맞춰져 있습니다.
+국내 기사를 빠르게 모아 시간순으로 확인하고 공유하는 Windows 데스크톱 프로그램입니다. Android 앱 **FSS Insights** 와 화면·기능·동작이 같도록 Android Jetpack Compose 소스를 **Compose Multiplatform Desktop**(Kotlin/JVM)으로 옮겨 만들었습니다. 버전과 데이터 형식이 Android 앱(v2.0.4, versionCode 57)과 맞춰져 있습니다.
 
 - Android 앱 저장소: <https://github.com/hdlee73/FSS_insights>
 - 이 저장소(Windows): <https://github.com/hdlee73/FSS_Insights_Win>
 
 ## 설치
 
-1. 오른쪽 **Releases** 에서 최신 버전의 `fss-insights-windows-vX.Y.Z.msi` 를 내려받습니다.
+1. 오른쪽 **Releases** 에서 최신 버전의 `fss-insights-windows-vX.Y.Z.msi`(일반 PC) 또는 `fss-insights-windows-arm64-vX.Y.Z.msi`(ARM 기반 PC)를 내려받습니다.
 2. 내려받은 `.msi` 를 두 번 눌러 설치합니다. 관리자 권한은 필요하지 않습니다(현재 사용자 설치).
 3. 시작 메뉴 또는 바탕 화면의 **FSS Insights** 를 실행합니다.
 
@@ -31,6 +31,14 @@ Windows SmartScreen이 "PC를 보호했습니다" 창을 띄울 수 있습니다
 - 검색 결과에서 수집·표시·중복 제외·언론 범위 제외 건수를 구분해 표시
 - 네이버 검색 사용 시 100건씩 최대 1,000번째 결과까지 추가 로딩
 - 새 버전 알림(트레이 풍선)과 앱 안에서 바로 내려받아 설치
+
+## 스마트 법령검색 (v2.0)
+
+서랍 메뉴의 **스마트 법령검색**에서 `자본시장법 제12조`처럼 입력하면 그 조문이 위임한 시행령·시행규칙·감독규정·시행세칙을 항·호 바로 아래에 보여 줍니다. 위임 문구 없이 인용만 한 규정은 맨 아래 "인용된 법규"로 따로 모으고, 비교표 보기와 PDF 저장(Edge/Chrome 인쇄 기능 사용)을 지원합니다. 법령 서버 주소는 뉴스 프록시(`/law`)를 함께 씁니다.
+
+## 핵심 내용 요약
+
+보도자료·금융관련 리포트·유권해석·비조치의견서·금감원/금융위 행정지도 목록에는 본문에서 핵심 문장을 골라 만든 요약이 제목 아래에 표시됩니다. 안드로이드의 기기 내장 AI(Gemini Nano)와 달리 윈도우는 내장 추출 요약을 쓰므로 별도 설치나 키가 필요 없고 가볍습니다.
 
 ## 화면 이동
 

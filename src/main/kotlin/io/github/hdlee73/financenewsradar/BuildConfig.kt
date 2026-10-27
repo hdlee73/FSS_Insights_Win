@@ -20,8 +20,8 @@ object BuildConfig {
         config.getProperty(key)?.takeIf { it.isNotBlank() }
             ?: System.getenv(env).orEmpty()
 
-    val VERSION_NAME: String = config.getProperty("APP_VERSION")?.takeIf { it.isNotBlank() } ?: "1.5.0"
-    val VERSION_CODE: Int = config.getProperty("APP_VERSION_CODE")?.toIntOrNull() ?: 42
+    val VERSION_NAME: String = config.getProperty("APP_VERSION")?.takeIf { it.isNotBlank() } ?: "2.0.4"
+    val VERSION_CODE: Int = config.getProperty("APP_VERSION_CODE")?.toIntOrNull() ?: 57
     val BUILD_TYPE: String = config.getProperty("BUILD_TYPE")?.takeIf { it.isNotBlank() } ?: "release"
 
     val NEWS_PROXY_URL: String = value("NEWS_PROXY_URL", "NEWS_PROXY_URL")

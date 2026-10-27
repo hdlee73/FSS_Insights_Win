@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "io.github.hdlee73"
-version = "1.5.0"
+version = "2.0.4"
 
 // 뉴스 프록시 설정: CI 저장소 변수(환경변수) 또는 -P 로 넘긴 값을 앱 리소스로 심는다. 비어 있으면 '서버 미연결'.
 val newsProxyUrl: String = (findProperty("newsProxyUrl") as String?)?.takeIf { it.isNotBlank() }
@@ -29,7 +29,7 @@ val generateBuildConfig by tasks.registering {
         dir.resolve("build-config.properties").writeText(
             buildString {
                 appendLine("APP_VERSION=$appVersion")
-                appendLine("APP_VERSION_CODE=42")
+                appendLine("APP_VERSION_CODE=57")
                 appendLine("BUILD_TYPE=release")
                 appendLine("NEWS_PROXY_URL=$newsProxyUrl")
                 appendLine("NEWS_PROXY_TOKEN=$newsProxyToken")
@@ -58,6 +58,13 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
     implementation("org.jsoup:jsoup:1.23.2")
     implementation("org.json:json:20260814")
+    implementation(project(":law-core"))
+    // 스마트 법령검색 화면이 쓰는 ViewModel·수명주기 도구(안드로이드와 같은 API).
+    implementation("androidx.lifecycle:lifecycle-viewmodel:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    // 요약용: PDF 앞쪽 본문 글 추출
+    implementation("org.apache.pdfbox:pdfbox:3.0.4")
 
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
@@ -78,7 +85,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "FSS Insights"
-            packageVersion = "1.5.0"
+            packageVersion = "2.0.4"
             // MSI 요약 정보(WiX light)는 코드페이지 1252로 기록되므로 description·copyright 는 ASCII 로 둔다.
             description = "FSS Insights for Windows - financial news, market data and research search"
             copyright = "Copyright (c) 2026 hdlee73"
