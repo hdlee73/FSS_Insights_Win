@@ -28,4 +28,13 @@ internal object WebViewFetcher {
         }
         return EdgeHeadless.plainFetch(url)
     }
+
+    /**
+     * 같은 사이트 안에서만 받을 수 있는 RSS·ajax를 받아 온다. 안드로이드는 페이지를 연 WebView 안에서 요청하지만,
+     * 데스크톱은 브라우저 요청 머리글을 흉내 낸 일반 요청으로 먼저 받아 본다. 실패하면 예외.
+     */
+    suspend fun fetchInPage(context: Context, pageUrl: String, path: String): String {
+        val origin = java.net.URI(pageUrl).let { "${it.scheme}://${it.host}" }
+        return EdgeHeadless.plainFetch(origin + path)
+    }
 }

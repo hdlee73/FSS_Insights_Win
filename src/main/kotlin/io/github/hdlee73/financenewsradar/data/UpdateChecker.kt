@@ -46,6 +46,9 @@ object UpdateChecker {
     /** Windows 설치 파일 확장자(내려받아 설치할 파일). */
     private val INSTALL_EXTENSIONS = listOf(".msi", ".exe")
 
+    /** ARM 기기(Windows on ARM)이면 arm64용 설치 파일을, 아니면 x64용을 고른다. */
+    private val isArm: Boolean = System.getProperty("os.arch").orEmpty().lowercase().let { "aarch64" in it || "arm" in it }
+
     /** "v0.12.1" / "0.12.1-debug" 같은 문자열을 숫자 목록으로. 해석 불가면 null. */
     internal fun parseVersion(raw: String): List<Int>? {
         val core = raw.trim().removePrefix("v").removePrefix("V").takeWhile { it.isDigit() || it == '.' }
@@ -92,7 +95,7 @@ object UpdateChecker {
                 for (i in 0 until assets.length()) {
                     val a = assets.getJSONObject(i)
                     val name = a.optString("name")
-                    if (INSTALL_EXTENSIONS.any { name.endsWith(it, ignoreCase = true) }) {
+                    if (INSTALL_EXTENSIONS.any { name.endsWith(it, ignoreCase = true) } && name.contains("arm64", ignoreCase = true) == isArm) {
                         assetUrl = a.optString("browser_download_url").ifBlank { null }
                         assetSize = a.optLong("size")
                         break
