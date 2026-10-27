@@ -34,7 +34,7 @@ data class PdfOptions(
     /** true 면 고른 단계(levels)를 열로 나란히 놓는 비교표(가로), false 면 현행 방식(위에서 아래로 이어 쓰기) */
     val compare: Boolean = false,
     val paper: PdfPaper = PdfPaper.A4,
-    /** 저장 형식: PDF 또는 한글(HWPX). HWPX는 판례·인용 조문 없이 조문·하위 규정·비교표만 담는다. */
+    /** 저장 형식: PDF 또는 한글(HWPX). 담기는 내용과 서식은 같다. */
     val format: SaveFormat = SaveFormat.PDF,
 )
 
@@ -246,7 +246,7 @@ object PdfExporter {
     private const val COMPARE_CSS = """
 table.cmp { border-collapse:collapse; width:100%; table-layout:fixed; }
 table.cmp thead { display:table-header-group; }
-table.cmp th { color:#fff; text-align:left; font-size:9.5pt; padding:3pt 4pt; font-weight:700; }
+table.cmp th { color:#fff; text-align:center; font-size:9.5pt; padding:3pt 4pt; font-weight:700; }
 table.cmp td { border:0.5pt solid #888; vertical-align:top; padding:4pt; font-size:9pt; line-height:18px; white-space:pre-wrap; overflow-wrap:anywhere; }
 table.cmp.five td { font-size:8.5pt; }
 table.cmp td b { font-weight:700; }
@@ -326,15 +326,25 @@ window.addEventListener('load', function () {
     }
 
     /** 한글(HWPX) 문서로 쓴다. 현행/비교표 선택과 포함 단계는 PDF와 같다. */
-    suspend fun writeHwpx(tree: DelegationTree, options: PdfOptions, out: OutputStream) = withContext(Dispatchers.IO) {
-        com.hdlee73.everylaw.core.domain.HwpxExporter.write(tree, options.compare, options.levels, out)
+    suspend fun writeHwpx(tree: DelegationTree, options: PdfOptions, extras: PdfExtras, out: OutputStream) = withContext(Dispatchers.IO) {
+        com.hdlee73.everylaw.core.domain.HwpxExporter.write(
+            tree,
+            com.hdlee73.everylaw.core.domain.HwpxOptions(
+                compare = options.compare, levels = options.levels,
+                paperLabel = options.paper.label, paperWidthPt = options.paper.w, paperHeightPt = options.paper.h,
+                precedentList = options.precedentList, precedentBodies = options.precedentBodies,
+                relatedArticles = options.relatedArticles, extras = extras,
+                footer = "FSS Insights ${BuildConfig.VERSION_NAME} · 만든이 이현덕 (hdlee73@gmail.com)",
+            ),
+            out,
+        )
     }
 
     /** 만든 문서를 임시 폴더에 저장한 뒤 기본 보기 프로그램으로 연다(공유는 거기서). */
     suspend fun share(context: Context, tree: DelegationTree, options: PdfOptions, extras: PdfExtras) {
         val dir = File(context.cacheDir, "law_pdf").apply { mkdirs() }
         val file = File(dir, fileName(tree, options.format.ext))
-        file.outputStream().use { if (options.format == SaveFormat.HWPX) writeHwpx(tree, options, it) else write(tree, options, extras, it) }
+        file.outputStream().use { if (options.format == SaveFormat.HWPX) writeHwpx(tree, options, extras, it) else write(tree, options, extras, it) }
         android.content.Desktop.openFile(file)
     }
 }

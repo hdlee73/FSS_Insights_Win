@@ -365,7 +365,7 @@ private fun TreeActions(
         val target = io.github.hdlee73.financenewsradar.platform.FileChooser.save("한글(HWPX) 저장", PdfExporter.fileName(tree, "hwpx"), "hwpx")
         if (target != null) scope.launch {
             Toast.makeText(context, "한글 문서를 만드는 중이에요", Toast.LENGTH_SHORT).show()
-            runCatching { target.outputStream().use { PdfExporter.writeHwpx(tree, options, it) } }
+            runCatching { val extras = buildExtras(options); target.outputStream().use { PdfExporter.writeHwpx(tree, options, extras, it) } }
                 .onSuccess { Toast.makeText(context, "한글(HWPX) 문서를 저장했어요", Toast.LENGTH_SHORT).show() }
                 .onFailure { Toast.makeText(context, "HWPX 저장 실패: ${it.message}", Toast.LENGTH_LONG).show() }
         }
