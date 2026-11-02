@@ -68,16 +68,13 @@ jobs:
           if (-not $msi) { throw "MSI 파일을 찾지 못했습니다." }
           $asset = "fss-insights-windows${{ matrix.suffix }}-v$env:VERSION.msi"
           Copy-Item $msi.FullName $asset
-          $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
-          "$hash  $asset" | Out-File -Encoding ascii "$asset.sha256"
-          Get-Item $asset, "$asset.sha256" | Select-Object Name, Length
+          Get-Item $asset | Select-Object Name, Length
 
       - uses: actions/upload-artifact@v4
         with:
           name: fss-insights-windows-${{ matrix.arch }}
           path: |
             fss-insights-windows${{ matrix.suffix }}-v${{ env.VERSION }}.msi
-            fss-insights-windows${{ matrix.suffix }}-v${{ env.VERSION }}.msi.sha256
 
   publish:
     needs: build

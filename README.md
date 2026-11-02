@@ -1,6 +1,6 @@
 # FSS Insights for Windows (뉴스 및 연구자료 검색)
 
-국내 기사를 빠르게 모아 시간순으로 확인하고 공유하는 Windows 데스크톱 프로그램입니다. Android 앱 **FSS Insights** 와 화면·기능·동작이 같도록 Android Jetpack Compose 소스를 **Compose Multiplatform Desktop**(Kotlin/JVM)으로 옮겨 만들었습니다. 버전과 데이터 형식이 Android 앱(v2.0.4, versionCode 57)과 맞춰져 있습니다.
+국내 기사를 빠르게 모아 시간순으로 확인하고 공유하는 Windows 데스크톱 프로그램입니다. Android 앱 **FSS Insights** 와 화면·기능·동작이 같도록 Android Jetpack Compose 소스를 **Compose Multiplatform Desktop**(Kotlin/JVM)으로 옮겨 만들었습니다. 버전과 데이터 형식이 Android 앱(v2.1.0, versionCode 58)과 맞춰져 있습니다.
 
 - Android 앱 저장소: <https://github.com/hdlee73/FSS_insights>
 - 이 저장소(Windows): <https://github.com/hdlee73/FSS_Insights_Win>
@@ -35,6 +35,10 @@ Windows SmartScreen이 "PC를 보호했습니다" 창을 띄울 수 있습니다
 ## 스마트 법령검색 (v2.0)
 
 서랍 메뉴의 **스마트 법령검색**에서 `자본시장법 제12조`처럼 입력하면 그 조문이 위임한 시행령·시행규칙·감독규정·시행세칙을 항·호 바로 아래에 보여 줍니다. 위임 문구 없이 인용만 한 규정은 맨 아래 "인용된 법규"로 따로 모으고, 비교표 보기와 PDF 저장(Edge/Chrome 인쇄 기능 사용)을 지원합니다. 법령 서버 주소는 뉴스 프록시(`/law`)를 함께 씁니다.
+
+## 기업 개황 및 공시 (DART, v2.1)
+
+서랍 메뉴의 **기업 개황 및 공시(DART)** 에서 회사명·종목코드로 검색해 개황, 최대주주 및 특수관계인(보통주·우선주 한 줄), 재무손익 현황, 정기보고서·주요사항보고서·기타공시와 주가(당일·1주~1년)를 봅니다. 공시는 1년·3년·5년·기간선택(최대 10년)으로 조회하고, 별(★)로 관심기업에 담으면 첫 화면에서 최근 7일 새 공시를 모아 봅니다. DART 인증키는 뉴스 프록시 서버(`/dart`)에만 있어 앱에는 들어 있지 않습니다.
 
 ## 핵심 내용 요약
 
